@@ -1,0 +1,8 @@
+{
+  "name": "mmm-clashofclansvillagetracker",
+  "version": "1.0.0",
+  "description": "MagicMirror module that visualizes Clash of Clans village completion from official API data.",
+  "main": "MMM-ClashOfClansVillageTracker.js",
+  "author": "",
+  "license": "MIT"
+}

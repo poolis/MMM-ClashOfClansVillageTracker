@@ -1,0 +1,188 @@
+.coc-tracker {
+  --bg-top: #f8efe1;
+  --bg-bottom: #edd6b1;
+  --card-bg: rgba(26, 20, 12, 0.7);
+  --text-main: #ffe8c1;
+  --text-muted: #dcbf8f;
+  --ring-bg: rgba(255, 255, 255, 0.2);
+  --ring-fill: #f7b733;
+  --bar-track: rgba(255, 255, 255, 0.15);
+  --bar-fill: linear-gradient(90deg, #f7971e, #ffd200);
+
+  width: min(460px, 92vw);
+  color: var(--text-main);
+  font-family: inherit;
+}
+
+.coc-card {
+  background:
+    radial-gradient(circle at 15% 15%, rgba(255, 207, 130, 0.2), transparent 36%),
+    radial-gradient(circle at 85% 10%, rgba(255, 174, 76, 0.16), transparent 34%),
+    linear-gradient(165deg, var(--bg-top), var(--bg-bottom));
+  border-radius: 18px;
+  padding: 18px;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.28);
+  position: relative;
+  overflow: hidden;
+}
+
+.coc-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--card-bg);
+  pointer-events: none;
+}
+
+.coc-card > * {
+  position: relative;
+  z-index: 1;
+}
+
+.coc-heading h2 {
+  margin: 0;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-size: 1.05rem;
+}
+
+.player-name {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  margin-top: 2px;
+}
+
+.coc-gauges {
+  margin-top: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+.coc-gauge {
+  flex: 1 1 180px;
+  text-align: center;
+}
+
+.coc-ring {
+  width: 120px;
+  height: 120px;
+}
+
+.ring-bg,
+.ring-fill {
+  fill: none;
+  stroke-width: 12;
+  transform: rotate(-90deg);
+  transform-origin: 60px 60px;
+}
+
+.ring-bg {
+  stroke: var(--ring-bg);
+}
+
+.ring-fill {
+  stroke: var(--ring-fill);
+  stroke-linecap: round;
+  transition: stroke-dashoffset 650ms ease;
+}
+
+.ring-value {
+  fill: var(--text-main);
+  text-anchor: middle;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.ring-sub {
+  fill: var(--text-muted);
+  text-anchor: middle;
+  font-size: 10px;
+}
+
+.gauge-label {
+  margin-top: 6px;
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.gauge-meta {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.coc-bars {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.bar-section {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 12px;
+  padding: 10px;
+}
+
+.bar-heading {
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 6px;
+}
+
+.bar-row {
+  display: grid;
+  grid-template-columns: 70px 1fr 44px;
+  align-items: center;
+  gap: 8px;
+  margin-top: 5px;
+}
+
+.bar-label {
+  font-size: 0.75rem;
+}
+
+.bar-track {
+  height: 9px;
+  border-radius: 999px;
+  background: var(--bar-track);
+  overflow: hidden;
+}
+
+.bar-fill {
+  height: 100%;
+  background: var(--bar-fill);
+  border-radius: inherit;
+  transition: width 700ms cubic-bezier(0.2, 1, 0.3, 1);
+}
+
+.bar-value {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  text-align: right;
+}
+
+.coc-footer {
+  margin-top: 10px;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
+.coc-tracker.loading,
+.coc-tracker.error {
+  font-size: 0.85rem;
+  color: var(--text-main);
+}
+
+@media (max-width: 480px) {
+  .coc-tracker {
+    width: 100%;
+  }
+
+  .bar-row {
+    grid-template-columns: 64px 1fr 38px;
+  }
+}
