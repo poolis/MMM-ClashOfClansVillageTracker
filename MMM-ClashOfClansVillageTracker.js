@@ -5,6 +5,8 @@ Module.register("MMM-ClashOfClansVillageTracker", {
     updateInterval: 1000 * 60 * 20,
     animationSpeed: 600,
     showBuilderBase: true,
+    compactMode: false,
+    backgroundColor: "",
     title: "Village Completion",
     locale: "en"
   },
@@ -67,6 +69,11 @@ Module.register("MMM-ClashOfClansVillageTracker", {
     const wrapper = document.createElement("div");
     wrapper.className = "coc-tracker";
 
+    if (this.config.backgroundColor) {
+      wrapper.style.setProperty("--bg-top", this.config.backgroundColor);
+      wrapper.style.setProperty("--bg-bottom", this.config.backgroundColor);
+    }
+
     if (this.dataState.loading) {
       wrapper.classList.add("loading");
       wrapper.innerText = "Loading Clash of Clans village progress...";
@@ -99,6 +106,12 @@ Module.register("MMM-ClashOfClansVillageTracker", {
 
     if (this.config.showBuilderBase && this.dataState.payload.builderBase) {
       gauges.innerHTML += this.renderCircularGauge(this.dataState.payload.builderBase, "Builder Base");
+    }
+
+    if (this.config.compactMode) {
+      card.appendChild(gauges);
+      wrapper.appendChild(card);
+      return wrapper;
     }
 
     const bars = document.createElement("div");

@@ -42,7 +42,9 @@ Add this to `config/config.js`:
     playerTag: "#ABC123",
     apiToken: "YOUR_CLASH_API_TOKEN",
     updateInterval: 1000 * 60 * 20,
-    showBuilderBase: true
+    showBuilderBase: true,
+    compactMode: false,
+    backgroundColor: "#3a2a1a"
   }
 }
 ```
@@ -54,6 +56,8 @@ Add this to `config/config.js`:
 - `apiToken`: Bearer token from Clash Developer API.
 - `updateInterval`: Refresh interval in milliseconds.
 - `showBuilderBase`: Show/hide Builder Base panel.
+- `compactMode`: When `true`, shows only the Home Village and Builder Base circular gauges.
+- `backgroundColor`: Any valid CSS color used for the module card background (example: `#3a2a1a` or `rgb(40,30,20)`).
 - `animationSpeed`: MagicMirror DOM update animation speed.
 
 ## Notes
