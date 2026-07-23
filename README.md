@@ -39,12 +39,13 @@ Add this to `config/config.js`:
   position: "top_right",
   config: {
     title: "Village Completion",
-    playerTag: "#ABC123",
+    playerTags: ["#ABC123", "#DEF456"],
     apiToken: "YOUR_CLASH_API_TOKEN",
     updateInterval: 1000 * 60 * 20,
+    scrollInterval: 1000 * 15,
     showBuilderBase: true,
     compactMode: false,
-    backgroundColor: "#3a2a1a"
+    backgroundColor: ["#3a2a1a", "#1a3048"]
   }
 }
 ```
@@ -52,17 +53,19 @@ Add this to `config/config.js`:
 ## Options
 
 - `title`: Header shown in the module.
-- `playerTag`: Clash player tag (with or without `#`).
+- `playerTags`: Array of Clash player tags (with or without `#`). The module scrolls through these tags.
 - `apiToken`: Bearer token from Clash Developer API.
-- `updateInterval`: Refresh interval in milliseconds.
+- `updateInterval`: How often data is reloaded from API/local export in milliseconds.
+- `scrollInterval`: Time in milliseconds before switching to the next player in `playerTags` (display rotation only, no forced reload each cycle).
 - `showBuilderBase`: Show/hide Builder Base panel.
 - `compactMode`: When `true`, shows only the Home Village and Builder Base circular gauges.
-- `backgroundColor`: Any valid CSS color used for the module card background (example: `#3a2a1a` or `rgb(40,30,20)`).
+- `backgroundColor`: Either a single CSS color string or an array of CSS colors. When using an array, each player uses the matching index color while scrolling.
 - `animationSpeed`: MagicMirror DOM update animation speed.
 
 ## Notes
 
 - This module uses only official Clash API endpoints.
+- Local export JSON is loaded per active player tag using this filename pattern: `clash_export_<playerTag>.json` (example: `clash_export_#LQGVJCLPG.json`).
 - Completion score is a weighted ratio:
 
   ```

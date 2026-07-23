@@ -1,8 +1,9 @@
 Module.register("MMM-ClashOfClansVillageTracker", {
   defaults: {
-    playerTag: "",
+    playerTags: [],
     apiToken: "",
     updateInterval: 1000 * 60 * 20,
+    scrollInterval: 1000 * 15,
     animationSpeed: 600,
     showBuilderBase: true,
     compactMode: false,
@@ -12,6 +13,10 @@ Module.register("MMM-ClashOfClansVillageTracker", {
   },
 
   start: function () {
+    this.playerTags = this.getConfiguredPlayerTags();
+    this.activePlayerIndex = 0;
+    this.playerStates = {};
+
     this.dataState = {
       loading: true,
       error: null,
@@ -19,27 +24,140 @@ Module.register("MMM-ClashOfClansVillageTracker", {
       updatedAt: null
     };
 
-    this.getData();
+    this.syncDataStateFromTag(this.getActivePlayerTag());
+    this.getData(true);
     this.scheduleUpdate();
+    this.scheduleScroll();
   },
 
   scheduleUpdate: function () {
+    const interval = Number(this.config.updateInterval) || 0;
+    if (interval <= 0) {
+      return;
+    }
+
     const self = this;
     setInterval(function () {
-      self.getData();
-    }, this.config.updateInterval);
+      self.getData(true);
+    }, interval);
   },
 
-  getData: function () {
-    if (!this.config.playerTag || !this.config.apiToken) {
+  scheduleScroll: function () {
+    if (this.playerTags.length < 2) {
+      return;
+    }
+
+    const interval = Number(this.config.scrollInterval) || 0;
+    if (interval <= 0) {
+      return;
+    }
+
+    const self = this;
+    setInterval(function () {
+      self.activePlayerIndex = (self.activePlayerIndex + 1) % self.playerTags.length;
+      self.syncDataStateFromTag(self.getActivePlayerTag());
+      self.updateDom(self.config.animationSpeed);
+
+      if (!self.dataState.payload && !self.dataState.loading) {
+        self.getData(true);
+      }
+    }, interval);
+  },
+
+  getConfiguredPlayerTags: function () {
+    const configured = Array.isArray(this.config.playerTags) ? this.config.playerTags : [];
+
+    return configured
+      .map((tag) => String(tag || "").trim())
+      .filter((tag) => tag.length > 0);
+  },
+
+  getActivePlayerTag: function () {
+    if (!this.playerTags.length) {
+      return "";
+    }
+
+    return this.playerTags[this.activePlayerIndex % this.playerTags.length];
+  },
+
+  getPlayerState: function (playerTag) {
+    if (!playerTag) {
+      return {
+        loading: false,
+        error: null,
+        payload: null,
+        updatedAt: null,
+        lastFetchAt: 0
+      };
+    }
+
+    if (!this.playerStates[playerTag]) {
+      this.playerStates[playerTag] = {
+        loading: false,
+        error: null,
+        payload: null,
+        updatedAt: null,
+        lastFetchAt: 0
+      };
+    }
+
+    return this.playerStates[playerTag];
+  },
+
+  syncDataStateFromTag: function (playerTag) {
+    const source = this.getPlayerState(playerTag);
+    this.dataState = {
+      loading: source.loading,
+      error: source.error,
+      payload: source.payload,
+      updatedAt: source.updatedAt
+    };
+  },
+
+  getCurrentBackgroundColor: function () {
+    if (Array.isArray(this.config.backgroundColor)) {
+      const colors = this.config.backgroundColor.filter((color) => String(color || "").trim().length > 0);
+      if (!colors.length) {
+        return "";
+      }
+
+      return colors[this.activePlayerIndex % colors.length];
+    }
+
+    return this.config.backgroundColor;
+  },
+
+  getData: function (force) {
+    const activeTag = this.getActivePlayerTag();
+
+    if (!activeTag || !this.config.apiToken) {
       this.dataState.loading = false;
-      this.dataState.error = "Missing playerTag or apiToken in module config.";
+      this.dataState.error = "Missing playerTags or apiToken in module config.";
       this.updateDom(this.config.animationSpeed);
       return;
     }
 
+    const state = this.getPlayerState(activeTag);
+    if (state.loading) {
+      return;
+    }
+
+    const updateInterval = Number(this.config.updateInterval) || 0;
+    const isStale = updateInterval <= 0 || !state.lastFetchAt || (Date.now() - state.lastFetchAt) >= updateInterval;
+    if (!force && !isStale) {
+      this.syncDataStateFromTag(activeTag);
+      this.updateDom(this.config.animationSpeed);
+      return;
+    }
+
+    state.loading = true;
+    state.error = null;
+
+    this.syncDataStateFromTag(activeTag);
+    this.updateDom(this.config.animationSpeed);
+
     this.sendSocketNotification("COC_FETCH_PLAYER", {
-      playerTag: this.config.playerTag,
+      playerTag: activeTag,
       apiToken: this.config.apiToken,
       showBuilderBase: this.config.showBuilderBase
     });
@@ -47,17 +165,36 @@ Module.register("MMM-ClashOfClansVillageTracker", {
 
   socketNotificationReceived: function (notification, payload) {
     if (notification === "COC_PLAYER_DATA") {
-      this.dataState.loading = false;
-      this.dataState.error = null;
-      this.dataState.payload = payload;
-      this.dataState.updatedAt = new Date();
-      this.updateDom(this.config.animationSpeed);
+      const responseTag = payload && payload.playerTag ? payload.playerTag : null;
+      const normalizedPayload = payload && payload.data ? payload.data : payload;
+      const resolvedTag = responseTag || this.getActivePlayerTag();
+      const state = this.getPlayerState(resolvedTag);
+
+      state.loading = false;
+      state.error = null;
+      state.payload = normalizedPayload;
+      state.updatedAt = new Date();
+      state.lastFetchAt = Date.now();
+
+      if (resolvedTag === this.getActivePlayerTag()) {
+        this.syncDataStateFromTag(resolvedTag);
+        this.updateDom(this.config.animationSpeed);
+      }
     }
 
     if (notification === "COC_PLAYER_ERROR") {
-      this.dataState.loading = false;
-      this.dataState.error = payload && payload.message ? payload.message : "Unknown API error.";
-      this.updateDom(this.config.animationSpeed);
+      const errorTag = payload && payload.playerTag ? payload.playerTag : null;
+      const resolvedTag = errorTag || this.getActivePlayerTag();
+      const state = this.getPlayerState(resolvedTag);
+
+      state.loading = false;
+      state.error = payload && payload.message ? payload.message : "Unknown API error.";
+      state.lastFetchAt = Date.now();
+
+      if (resolvedTag === this.getActivePlayerTag()) {
+        this.syncDataStateFromTag(resolvedTag);
+        this.updateDom(this.config.animationSpeed);
+      }
     }
   },
 
@@ -69,14 +206,15 @@ Module.register("MMM-ClashOfClansVillageTracker", {
     const wrapper = document.createElement("div");
     wrapper.className = "coc-tracker";
 
-    if (this.config.backgroundColor) {
-      wrapper.style.setProperty("--bg-top", this.config.backgroundColor);
-      wrapper.style.setProperty("--bg-bottom", this.config.backgroundColor);
+    const backgroundColor = this.getCurrentBackgroundColor();
+    if (backgroundColor) {
+      wrapper.style.setProperty("--bg-top", backgroundColor);
+      wrapper.style.setProperty("--bg-bottom", backgroundColor);
     }
 
     if (this.dataState.loading) {
       wrapper.classList.add("loading");
-      wrapper.innerText = "Loading Clash of Clans village progress...";
+      wrapper.innerText = "Loading Clash of Clans village progress for " + this.getActivePlayerTag() + "...";
       return wrapper;
     }
 

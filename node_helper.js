@@ -11,19 +11,23 @@ module.exports = NodeHelper.create({
 
     this.fetchPlayer(payload)
       .then((playerData) => {
-        const localExport = this.readLocalExport();
+        const localExport = this.readLocalExport(payload.playerTag);
         const normalized = this.normalizePlayerData(playerData, payload.showBuilderBase, localExport);
-        this.sendSocketNotification("COC_PLAYER_DATA", normalized);
+        this.sendSocketNotification("COC_PLAYER_DATA", {
+          playerTag: payload.playerTag,
+          data: normalized
+        });
       })
       .catch((error) => {
         this.sendSocketNotification("COC_PLAYER_ERROR", {
+          playerTag: payload.playerTag,
           message: error.message || "Failed to fetch player data"
         });
       });
   },
 
   fetchPlayer: function (payload) {
-    const tag = encodeURIComponent((payload.playerTag || "").replace(/^#/, "#"));
+    const tag = encodeURIComponent(this.normalizePlayerTag(payload.playerTag));
     const options = {
       hostname: "api.clashofclans.com",
       port: 443,
@@ -64,6 +68,16 @@ module.exports = NodeHelper.create({
 
       req.end();
     });
+  },
+
+  normalizePlayerTag: function (playerTag) {
+    const cleaned = String(playerTag || "").trim();
+
+    if (!cleaned) {
+      return "";
+    }
+
+    return cleaned.charAt(0) === "#" ? cleaned : ("#" + cleaned);
   },
 
   extractApiError: function (rawBody) {
@@ -215,8 +229,14 @@ module.exports = NodeHelper.create({
     };
   },
 
-  readLocalExport: function () {
-    const exportPath = path.join(__dirname, "clash_export.json");
+  readLocalExport: function (playerTag) {
+    const normalizedTag = this.normalizePlayerTag(playerTag);
+    if (!normalizedTag) {
+      return null;
+    }
+
+    const exportFileName = "clash_export_" + normalizedTag + ".json";
+    const exportPath = path.join(__dirname, exportFileName);
 
     if (!fs.existsSync(exportPath)) {
       return null;
