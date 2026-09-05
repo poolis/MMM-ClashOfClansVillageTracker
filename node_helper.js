@@ -2,6 +2,60 @@ const NodeHelper = require("node_helper");
 const https = require("https");
 const fs = require("fs");
 const path = require("path");
+const cocData = require("clash-of-clans-data");
+
+// The official API's maxLevel is the unit's absolute max (at max Town Hall),
+// not the max reachable at the player's current Town Hall, so we rebuild that
+// cap ourselves from static game data (this is what third-party trackers do).
+const LEVEL_CAP_INDEX = buildLevelCapIndex();
+
+function buildLevelCapIndex() {
+  const byName = (list) => {
+    const map = {};
+    list.forEach((item) => {
+      map[String(item.name).toLowerCase()] = item;
+    });
+    return map;
+  };
+
+  return {
+    troops: byName(cocData.home().troops().get()),
+    siegeMachines: byName(cocData.home().siegeMachines().get()),
+    spells: byName(cocData.home().spells().get()),
+    pets: byName(cocData.home().pets().get()),
+    heroes: byName(cocData.home().heroes().get()),
+    equipment: byName(cocData.home().heroEquipment().get()),
+    heroHallLevels: cocData.home().armyBuildings().heroHall().first().levels,
+    blacksmithLevels: cocData.home().armyBuildings().blacksmith().first().levels
+  };
+}
+
+function maxLevelForTownHall(def, townHallLevel) {
+  if (!def || !Array.isArray(def.levels)) {
+    return null;
+  }
+
+  const unlocked = def.levels.filter((lvl) => (Number(lvl.townHallRequired) || 0) <= townHallLevel);
+  if (!unlocked.length) {
+    return 0;
+  }
+
+  return unlocked.reduce((max, lvl) => Math.max(max, Number(lvl.level) || 0), 0);
+}
+
+function highestRequirementEntry(entries, townHallLevel) {
+  const unlocked = entries.filter((entry) => (Number(entry.townHallRequired) || 0) <= townHallLevel);
+  if (!unlocked.length) {
+    return null;
+  }
+
+  return unlocked.reduce((best, entry) => (entry.level > best.level ? entry : best), unlocked[0]);
+}
+
+// heroLevelCaps keys are camelCase, but hero "id" values from the data package are kebab-case.
+function toCamelCase(kebabId) {
+  return String(kebabId).replace(/-([a-z])/g, (match, letter) => letter.toUpperCase());
+}
 
 module.exports = NodeHelper.create({
   socketNotificationReceived: function (notification, payload) {
@@ -121,14 +175,15 @@ module.exports = NodeHelper.create({
     let categories;
 
     if (villageType === "home") {
-      const split = this.splitHomeTroopsAndPets(player.troops);
-      const labTroops = this.getCategoryProgressFromItems(split.troops, "Lab");
-      const spells = this.getCategoryProgress(player.spells, villageType, "Spells");
-      const lab = this.mergeCategoryProgress([labTroops, spells], "Lab");
-      const heroes = this.getCategoryProgress(player.heroes, villageType, "Heroes");
-      const equipment = this.getCategoryProgress(player.heroEquipment, villageType, "Equipment");
-      const pets = this.getCategoryProgressFromItems(split.pets, "Pets");
       const effectiveTownHall = this.getEffectiveTownHallLevel(player.townHallLevel, localExport);
+      const split = this.splitHomeTroopsAndPets(player.troops);
+      const labTroops = this.getCategoryProgressFromItems(split.troops, "Lab", "troop", effectiveTownHall);
+      const labSiegeMachines = this.getCategoryProgressFromItems(split.siegeMachines, "Lab", "siegeMachine", effectiveTownHall);
+      const spells = this.getCategoryProgress(player.spells, villageType, "Spells", "spell", effectiveTownHall);
+      const lab = this.mergeCategoryProgress([labTroops, labSiegeMachines, spells], "Lab");
+      const heroes = this.getCategoryProgress(player.heroes, villageType, "Heroes", "hero", effectiveTownHall);
+      const equipment = this.getCategoryProgress(player.heroEquipment, villageType, "Equipment", "equipment", effectiveTownHall);
+      const pets = this.getCategoryProgressFromItems(split.pets, "Pets", "pet", effectiveTownHall);
       const apiCategories = [lab, heroes, equipment, pets];
       const exportCategories = localExport
         ? [
@@ -158,7 +213,7 @@ module.exports = NodeHelper.create({
     };
   },
 
-  getCategoryProgress: function (items, villageType, label) {
+  getCategoryProgress: function (items, villageType, label, category, townHallLevel) {
     if (!Array.isArray(items)) {
       return {
         label,
@@ -172,25 +227,10 @@ module.exports = NodeHelper.create({
       return (item.village || "home") === villageType;
     });
 
-    const earned = scoped.reduce((sum, item) => {
-      return sum + (Number(item.level) || 0);
-    }, 0);
-
-    const total = scoped.reduce((sum, item) => {
-      return sum + (Number(item.maxLevel) || 0);
-    }, 0);
-
-    const percent = total > 0 ? (earned / total) * 100 : 0;
-
-    return {
-      label,
-      earned,
-      total,
-      percent
-    };
+    return this.summarizeItems(scoped, label, category, townHallLevel);
   },
 
-  getCategoryProgressFromItems: function (items, label) {
+  getCategoryProgressFromItems: function (items, label, category, townHallLevel) {
     if (!Array.isArray(items)) {
       return {
         label,
@@ -200,12 +240,21 @@ module.exports = NodeHelper.create({
       };
     }
 
+    return this.summarizeItems(items, label, category, townHallLevel);
+  },
+
+  summarizeItems: function (items, label, category, townHallLevel) {
     const earned = items.reduce((sum, item) => {
       return sum + (Number(item.level) || 0);
     }, 0);
 
     const total = items.reduce((sum, item) => {
-      return sum + (Number(item.maxLevel) || 0);
+      const rawLevel = Number(item.level) || 0;
+      const cap = this.getTownHallLevelCap(category, item.name, townHallLevel);
+      // The static data package can lag behind live game balance updates, so
+      // never let a stale cap sit below what the player has actually reached.
+      const effectiveCap = cap !== null ? Math.max(cap, rawLevel) : (Number(item.maxLevel) || 0);
+      return sum + effectiveCap;
     }, 0);
 
     return {
@@ -214,6 +263,60 @@ module.exports = NodeHelper.create({
       total,
       percent: total > 0 ? (earned / total) * 100 : 0
     };
+  },
+
+  getTownHallLevelCap: function (category, name, townHallLevel) {
+    if (!category || !townHallLevel) {
+      return null;
+    }
+
+    const key = String(name || "").toLowerCase();
+
+    if (category === "troop") {
+      return maxLevelForTownHall(LEVEL_CAP_INDEX.troops[key], townHallLevel);
+    }
+
+    if (category === "siegeMachine") {
+      return maxLevelForTownHall(LEVEL_CAP_INDEX.siegeMachines[key], townHallLevel);
+    }
+
+    if (category === "spell") {
+      return maxLevelForTownHall(LEVEL_CAP_INDEX.spells[key], townHallLevel);
+    }
+
+    if (category === "pet") {
+      return maxLevelForTownHall(LEVEL_CAP_INDEX.pets[key], townHallLevel);
+    }
+
+    if (category === "hero") {
+      const def = LEVEL_CAP_INDEX.heroes[key];
+      if (!def) {
+        return null;
+      }
+
+      const entry = highestRequirementEntry(LEVEL_CAP_INDEX.heroHallLevels, townHallLevel);
+      if (!entry || !entry.heroLevelCaps) {
+        return 0;
+      }
+
+      return Number(entry.heroLevelCaps[toCamelCase(def.id)]) || 0;
+    }
+
+    if (category === "equipment") {
+      const def = LEVEL_CAP_INDEX.equipment[key];
+      if (!def) {
+        return null;
+      }
+
+      const entry = highestRequirementEntry(LEVEL_CAP_INDEX.blacksmithLevels, townHallLevel);
+      if (!entry || !entry.maxEquipmentLevel) {
+        return 0;
+      }
+
+      return Number(entry.maxEquipmentLevel[String(def.rarity).toLowerCase()]) || 0;
+    }
+
+    return null;
   },
 
   mergeCategoryProgress: function (parts, label) {
@@ -413,35 +516,17 @@ module.exports = NodeHelper.create({
   },
 
   splitHomeTroopsAndPets: function (troops) {
-    const petNames = {
-      "L.A.S.S.I": true,
-      "Electro Owl": true,
-      "Mighty Yak": true,
-      "Unicorn": true,
-      "Frosty": true,
-      "Diggy": true,
-      "Poison Lizard": true,
-      "Phoenix": true,
-      "Spirit Fox": true,
-      "Angry Jelly": true,
-      "Sneezy": true
-    };
-
     const homeTroops = Array.isArray(troops)
       ? troops.filter((item) => (item.village || "home") === "home")
       : [];
 
-    const pets = homeTroops.filter((item) => {
-      return !!petNames[item.name];
-    });
-
-    const nonPets = homeTroops.filter((item) => {
-      return !petNames[item.name];
-    });
+    const isPet = (item) => !!LEVEL_CAP_INDEX.pets[String(item.name || "").toLowerCase()];
+    const isSiegeMachine = (item) => !!LEVEL_CAP_INDEX.siegeMachines[String(item.name || "").toLowerCase()];
 
     return {
-      troops: nonPets,
-      pets
+      troops: homeTroops.filter((item) => !isPet(item) && !isSiegeMachine(item)),
+      pets: homeTroops.filter(isPet),
+      siegeMachines: homeTroops.filter(isSiegeMachine)
     };
   }
 });
