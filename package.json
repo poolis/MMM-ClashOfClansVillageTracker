@@ -6,6 +6,6 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "clash-of-clans-data": "^0.16.0"
+    "clash-of-clans-data": "^0.19.1"
   }
 }

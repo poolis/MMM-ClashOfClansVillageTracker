@@ -18,15 +18,18 @@ function buildLevelCapIndex() {
     return map;
   };
 
+  const home = cocData.home();
+  
   return {
-    troops: byName(cocData.home().troops().get()),
-    siegeMachines: byName(cocData.home().siegeMachines().get()),
-    spells: byName(cocData.home().spells().get()),
-    pets: byName(cocData.home().pets().get()),
-    heroes: byName(cocData.home().heroes().get()),
-    equipment: byName(cocData.home().heroEquipment().get()),
-    heroHallLevels: cocData.home().armyBuildings().heroHall().first().levels,
-    blacksmithLevels: cocData.home().armyBuildings().blacksmith().first().levels
+    troops: byName(home.troops().data),
+    siegeMachines: byName(home.siegeMachines().data),
+    spells: byName(home.spells().data),
+    pets: byName(home.pets().data),
+    heroes: byName(home.heroes().data),
+    equipment: byName(home.heroEquipment().data),
+    craftedDefenses: byName(home.craftedDefenses().data),
+    heroHallLevels: home.armyBuildings().heroHall().data[0].levels,
+    blacksmithLevels: home.armyBuildings().blacksmith().data[0].levels
   };
 }
 
