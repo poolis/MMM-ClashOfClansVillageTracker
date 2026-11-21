@@ -430,10 +430,12 @@ module.exports = NodeHelper.create({
       return sum + (Number(item.supercharge) > 0 ? count : 0);
     }, 0);
 
+    // TH19's supercharge total is dynamic (it grows as more buildings unlock
+    // supercharge eligibility), so it must be derived from the export rather
+    // than fixed like the TH17/TH18 totals below.
     const knownTotalsByTh = {
       17: 59,
-      18: 59,
-      19: 15
+      18: 59
     };
 
     const total = knownTotalsByTh[Number(townHallLevel)] || observedTotal;
@@ -509,18 +511,22 @@ module.exports = NodeHelper.create({
       19: 20
     };
 
-    const maxWallLevel = maxWallLevelByTh[Number(townHallLevel)] || 1;
-    
-    // Sum all wall levels: for each wall entry, sum level * count
+    // Sum all wall levels: for each wall entry, sum level * count, and track
+    // the highest observed level to use as a fallback cap for unmapped Town
+    // Halls (e.g. TH10 and below) instead of incorrectly forcing it to 1.
     let earnedTotal = 0;
     let countTotal = 0;
-    
+    let maxObservedLevel = 0;
+
     wallsArray.forEach((wall) => {
       const level = Math.max(0, Number(wall.lvl) || 0);
       const count = Math.max(1, Number(wall.cnt) || 1);
       earnedTotal += level * count;
       countTotal += count;
+      maxObservedLevel = Math.max(maxObservedLevel, level);
     });
+
+    const maxWallLevel = maxWallLevelByTh[Number(townHallLevel)] || maxObservedLevel || 1;
 
     // Calculate total possible based on how many walls can reach max level
     // Some walls may have lower max levels due to availability/progression
