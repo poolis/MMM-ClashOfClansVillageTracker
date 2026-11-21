@@ -474,7 +474,7 @@ module.exports = NodeHelper.create({
     const knownTotalsByTh = {
       17: 114,
       18: 114,
-      19: 114
+      19: 100
     };
 
     const total = knownTotalsByTh[Number(townHallLevel)] || observedTotal;
