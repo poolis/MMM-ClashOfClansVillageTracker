@@ -492,8 +492,8 @@ module.exports = NodeHelper.create({
       return null;
     }
 
-    const walls = localExport.buildings.find((item) => item && item.data === 1000010);
-    if (!walls) {
+    const wallsArray = localExport.buildings.filter((item) => item && item.data === 1000010);
+    if (!wallsArray || wallsArray.length === 0) {
       return null;
     }
 
@@ -509,15 +509,36 @@ module.exports = NodeHelper.create({
       19: 20
     };
 
-    const wallLevel = Math.max(0, Number(walls.lvl) || 0);
-    const count = Math.max(1, Number(walls.cnt) || 1);
-    const maxWallLevel = maxWallLevelByTh[Number(townHallLevel)] || wallLevel || 1;
+    const maxWallLevel = maxWallLevelByTh[Number(townHallLevel)] || 1;
+    
+    // Sum all wall levels: for each wall entry, sum level * count
+    let earnedTotal = 0;
+    let countTotal = 0;
+    
+    wallsArray.forEach((wall) => {
+      const level = Math.max(0, Number(wall.lvl) || 0);
+      const count = Math.max(1, Number(wall.cnt) || 1);
+      earnedTotal += level * count;
+      countTotal += count;
+    });
+
+    // Calculate total possible based on how many walls can reach max level
+    // Some walls may have lower max levels due to availability/progression
+    // For TH19: 150 walls can reach level 20, remaining walls capped at level 19
+    let totalPossible = 0;
+    if (townHallLevel === 19) {
+      const upgradeableToMax = Math.min(150, countTotal);
+      const remainingWalls = Math.max(0, countTotal - upgradeableToMax);
+      totalPossible = (upgradeableToMax * maxWallLevel) + (remainingWalls * (maxWallLevel - 1));
+    } else {
+      totalPossible = maxWallLevel * countTotal;
+    }
 
     return {
       label: "Walls",
-      earned: wallLevel * count,
-      total: maxWallLevel * count,
-      percent: maxWallLevel > 0 ? (wallLevel / maxWallLevel) * 100 : 0
+      earned: earnedTotal,
+      total: totalPossible,
+      percent: totalPossible > 0 ? (earnedTotal / totalPossible) * 100 : 0
     };
   },
 
