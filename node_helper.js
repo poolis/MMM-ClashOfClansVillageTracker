@@ -20,18 +20,28 @@ function buildLevelCapIndex() {
 
   const home = cocData.home();
   const heroHallLevels = home.armyBuildings().heroHall().data[0].levels;
+  const blacksmithLevels = home.armyBuildings().blacksmith().data[0].levels;
+  const troops = byName(home.troops().data);
+  const siegeMachines = byName(home.siegeMachines().data);
+  const spells = byName(home.spells().data);
+  const pets = byName(home.pets().data);
 
   return {
-    troops: byName(home.troops().data),
-    siegeMachines: byName(home.siegeMachines().data),
-    spells: byName(home.spells().data),
-    pets: byName(home.pets().data),
+    troops: troops,
+    troopsMaxTownHall: maxTownHallAcrossDefs(troops),
+    siegeMachines: siegeMachines,
+    siegeMachinesMaxTownHall: maxTownHallAcrossDefs(siegeMachines),
+    spells: spells,
+    spellsMaxTownHall: maxTownHallAcrossDefs(spells),
+    pets: pets,
+    petsMaxTownHall: maxTownHallAcrossDefs(pets),
     heroes: byName(home.heroes().data),
     equipment: byName(home.heroEquipment().data),
     craftedDefenses: byName(home.craftedDefenses().data),
     heroHallLevels: heroHallLevels,
     heroHallMaxTownHall: maxTownHallRequired(heroHallLevels),
-    blacksmithLevels: home.armyBuildings().blacksmith().data[0].levels
+    blacksmithLevels: blacksmithLevels,
+    blacksmithMaxTownHall: maxTownHallRequired(blacksmithLevels)
   };
 }
 
@@ -42,8 +52,26 @@ function maxTownHallRequired(entries) {
   );
 }
 
-function maxLevelForTownHall(def, townHallLevel) {
+// The highest Town Hall covered anywhere in this category's static data.
+// Individual units legitimately stop getting new levels at different Town
+// Halls (that's real game design), but if *no* unit in the category has
+// data past this Town Hall, the package itself hasn't been updated for it.
+function maxTownHallAcrossDefs(defsByName) {
+  return Object.keys(defsByName).reduce((max, key) => {
+    return Math.max(max, maxTownHallRequired(defsByName[key].levels));
+  }, 0);
+}
+
+function maxLevelForTownHall(def, townHallLevel, categoryMaxTownHall) {
   if (!def || !Array.isArray(def.levels)) {
+    return null;
+  }
+
+  if (typeof categoryMaxTownHall === "number" && townHallLevel > categoryMaxTownHall) {
+    // No unit in this category has data past categoryMaxTownHall, meaning
+    // the static data package doesn't cover this Town Hall yet. Let the
+    // caller fall back to the live API's maxLevel instead of reusing this
+    // unit's last known cap, which may now be stale rather than its true max.
     return null;
   }
 
@@ -285,19 +313,23 @@ module.exports = NodeHelper.create({
     const key = String(name || "").toLowerCase();
 
     if (category === "troop") {
-      return maxLevelForTownHall(LEVEL_CAP_INDEX.troops[key], townHallLevel);
+      return maxLevelForTownHall(LEVEL_CAP_INDEX.troops[key], townHallLevel, LEVEL_CAP_INDEX.troopsMaxTownHall);
     }
 
     if (category === "siegeMachine") {
-      return maxLevelForTownHall(LEVEL_CAP_INDEX.siegeMachines[key], townHallLevel);
+      return maxLevelForTownHall(
+        LEVEL_CAP_INDEX.siegeMachines[key],
+        townHallLevel,
+        LEVEL_CAP_INDEX.siegeMachinesMaxTownHall
+      );
     }
 
     if (category === "spell") {
-      return maxLevelForTownHall(LEVEL_CAP_INDEX.spells[key], townHallLevel);
+      return maxLevelForTownHall(LEVEL_CAP_INDEX.spells[key], townHallLevel, LEVEL_CAP_INDEX.spellsMaxTownHall);
     }
 
     if (category === "pet") {
-      return maxLevelForTownHall(LEVEL_CAP_INDEX.pets[key], townHallLevel);
+      return maxLevelForTownHall(LEVEL_CAP_INDEX.pets[key], townHallLevel, LEVEL_CAP_INDEX.petsMaxTownHall);
     }
 
     if (category === "hero") {
@@ -324,6 +356,13 @@ module.exports = NodeHelper.create({
     if (category === "equipment") {
       const def = LEVEL_CAP_INDEX.equipment[key];
       if (!def) {
+        return null;
+      }
+
+      if (townHallLevel > LEVEL_CAP_INDEX.blacksmithMaxTownHall) {
+        // The static blacksmith data doesn't cover this Town Hall yet, so
+        // fall back to the API's maxLevel instead of applying a stale,
+        // lower cap from the highest Town Hall the data package knows about.
         return null;
       }
 
