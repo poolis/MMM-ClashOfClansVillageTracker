@@ -19,7 +19,8 @@ function buildLevelCapIndex() {
   };
 
   const home = cocData.home();
-  
+  const heroHallLevels = home.armyBuildings().heroHall().data[0].levels;
+
   return {
     troops: byName(home.troops().data),
     siegeMachines: byName(home.siegeMachines().data),
@@ -28,9 +29,17 @@ function buildLevelCapIndex() {
     heroes: byName(home.heroes().data),
     equipment: byName(home.heroEquipment().data),
     craftedDefenses: byName(home.craftedDefenses().data),
-    heroHallLevels: home.armyBuildings().heroHall().data[0].levels,
+    heroHallLevels: heroHallLevels,
+    heroHallMaxTownHall: maxTownHallRequired(heroHallLevels),
     blacksmithLevels: home.armyBuildings().blacksmith().data[0].levels
   };
+}
+
+function maxTownHallRequired(entries) {
+  return (Array.isArray(entries) ? entries : []).reduce(
+    (max, entry) => Math.max(max, Number(entry.townHallRequired) || 0),
+    0
+  );
 }
 
 function maxLevelForTownHall(def, townHallLevel) {
@@ -294,6 +303,13 @@ module.exports = NodeHelper.create({
     if (category === "hero") {
       const def = LEVEL_CAP_INDEX.heroes[key];
       if (!def) {
+        return null;
+      }
+
+      if (townHallLevel > LEVEL_CAP_INDEX.heroHallMaxTownHall) {
+        // The static hero hall data doesn't cover this Town Hall yet, so
+        // fall back to the API's maxLevel instead of applying a stale,
+        // lower cap from the highest Town Hall the data package knows about.
         return null;
       }
 
