@@ -429,7 +429,8 @@ module.exports = NodeHelper.create({
 
     const knownTotalsByTh = {
       17: 59,
-      18: 59
+      18: 59,
+      19: 27
     };
 
     const total = knownTotalsByTh[Number(townHallLevel)] || observedTotal;
@@ -469,7 +470,8 @@ module.exports = NodeHelper.create({
     const observedTotal = modules.length * 10;
     const knownTotalsByTh = {
       17: 114,
-      18: 114
+      18: 114,
+      19: 114
     };
 
     const total = knownTotalsByTh[Number(townHallLevel)] || observedTotal;
@@ -500,7 +502,8 @@ module.exports = NodeHelper.create({
       15: 17,
       16: 18,
       17: 19,
-      18: 19
+      18: 19,
+      19: 20
     };
 
     const wallLevel = Math.max(0, Number(walls.lvl) || 0);
