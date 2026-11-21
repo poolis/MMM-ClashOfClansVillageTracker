@@ -18,16 +18,28 @@ function buildLevelCapIndex() {
     return map;
   };
 
+  const home = cocData.home();
+  const heroHallLevels = home.armyBuildings().heroHall().data[0].levels;
+
   return {
-    troops: byName(cocData.home().troops().get()),
-    siegeMachines: byName(cocData.home().siegeMachines().get()),
-    spells: byName(cocData.home().spells().get()),
-    pets: byName(cocData.home().pets().get()),
-    heroes: byName(cocData.home().heroes().get()),
-    equipment: byName(cocData.home().heroEquipment().get()),
-    heroHallLevels: cocData.home().armyBuildings().heroHall().first().levels,
-    blacksmithLevels: cocData.home().armyBuildings().blacksmith().first().levels
+    troops: byName(home.troops().data),
+    siegeMachines: byName(home.siegeMachines().data),
+    spells: byName(home.spells().data),
+    pets: byName(home.pets().data),
+    heroes: byName(home.heroes().data),
+    equipment: byName(home.heroEquipment().data),
+    craftedDefenses: byName(home.craftedDefenses().data),
+    heroHallLevels: heroHallLevels,
+    heroHallMaxTownHall: maxTownHallRequired(heroHallLevels),
+    blacksmithLevels: home.armyBuildings().blacksmith().data[0].levels
   };
+}
+
+function maxTownHallRequired(entries) {
+  return (Array.isArray(entries) ? entries : []).reduce(
+    (max, entry) => Math.max(max, Number(entry.townHallRequired) || 0),
+    0
+  );
 }
 
 function maxLevelForTownHall(def, townHallLevel) {
@@ -294,6 +306,13 @@ module.exports = NodeHelper.create({
         return null;
       }
 
+      if (townHallLevel > LEVEL_CAP_INDEX.heroHallMaxTownHall) {
+        // The static hero hall data doesn't cover this Town Hall yet, so
+        // fall back to the API's maxLevel instead of applying a stale,
+        // lower cap from the highest Town Hall the data package knows about.
+        return null;
+      }
+
       const entry = highestRequirementEntry(LEVEL_CAP_INDEX.heroHallLevels, townHallLevel);
       if (!entry || !entry.heroLevelCaps) {
         return 0;
@@ -427,6 +446,9 @@ module.exports = NodeHelper.create({
       return sum + (Number(item.supercharge) > 0 ? count : 0);
     }, 0);
 
+    // TH19's supercharge total is dynamic (it grows as more buildings unlock
+    // supercharge eligibility), so it must be derived from the export rather
+    // than fixed like the TH17/TH18 totals below.
     const knownTotalsByTh = {
       17: 59,
       18: 59
@@ -469,7 +491,8 @@ module.exports = NodeHelper.create({
     const observedTotal = modules.length * 10;
     const knownTotalsByTh = {
       17: 114,
-      18: 114
+      18: 114,
+      19: 100
     };
 
     const total = knownTotalsByTh[Number(townHallLevel)] || observedTotal;
@@ -487,8 +510,8 @@ module.exports = NodeHelper.create({
       return null;
     }
 
-    const walls = localExport.buildings.find((item) => item && item.data === 1000010);
-    if (!walls) {
+    const wallsArray = localExport.buildings.filter((item) => item && item.data === 1000010);
+    if (!wallsArray || wallsArray.length === 0) {
       return null;
     }
 
@@ -500,18 +523,44 @@ module.exports = NodeHelper.create({
       15: 17,
       16: 18,
       17: 19,
-      18: 19
+      18: 19,
+      19: 20
     };
 
-    const wallLevel = Math.max(0, Number(walls.lvl) || 0);
-    const count = Math.max(1, Number(walls.cnt) || 1);
-    const maxWallLevel = maxWallLevelByTh[Number(townHallLevel)] || wallLevel || 1;
+    // Sum all wall levels: for each wall entry, sum level * count, and track
+    // the highest observed level to use as a fallback cap for unmapped Town
+    // Halls (e.g. TH10 and below) instead of incorrectly forcing it to 1.
+    let earnedTotal = 0;
+    let countTotal = 0;
+    let maxObservedLevel = 0;
+
+    wallsArray.forEach((wall) => {
+      const level = Math.max(0, Number(wall.lvl) || 0);
+      const count = Math.max(1, Number(wall.cnt) || 1);
+      earnedTotal += level * count;
+      countTotal += count;
+      maxObservedLevel = Math.max(maxObservedLevel, level);
+    });
+
+    const maxWallLevel = maxWallLevelByTh[Number(townHallLevel)] || maxObservedLevel || 1;
+
+    // Calculate total possible based on how many walls can reach max level
+    // Some walls may have lower max levels due to availability/progression
+    // For TH19: 150 walls can reach level 20, remaining walls capped at level 19
+    let totalPossible = 0;
+    if (townHallLevel === 19) {
+      const upgradeableToMax = Math.min(150, countTotal);
+      const remainingWalls = Math.max(0, countTotal - upgradeableToMax);
+      totalPossible = (upgradeableToMax * maxWallLevel) + (remainingWalls * (maxWallLevel - 1));
+    } else {
+      totalPossible = maxWallLevel * countTotal;
+    }
 
     return {
       label: "Walls",
-      earned: wallLevel * count,
-      total: maxWallLevel * count,
-      percent: maxWallLevel > 0 ? (wallLevel / maxWallLevel) * 100 : 0
+      earned: earnedTotal,
+      total: totalPossible,
+      percent: totalPossible > 0 ? (earnedTotal / totalPossible) * 100 : 0
     };
   },
 
