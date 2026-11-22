@@ -113,6 +113,28 @@ function maxTownHallRequired(entries) {
   );
 }
 
+// How many instances of this building are available at townHallLevel. Some
+// defenses get consumed by later merges into a different building (e.g.
+// several Cannons merging away), reducing the standalone count even though
+// the nominal "count" stays the same - countAfterMerges reflects that.
+function availableCountForTownHall(def, townHallLevel) {
+  if (!def || !Array.isArray(def.availablePerTownHall) || !def.availablePerTownHall.length) {
+    return null;
+  }
+
+  const unlocked = def.availablePerTownHall.filter((entry) => (Number(entry.townHallLevel) || 0) <= townHallLevel);
+  if (!unlocked.length) {
+    return 0;
+  }
+
+  const latest = unlocked.reduce((top, entry) => {
+    return Number(entry.townHallLevel) > Number(top.townHallLevel) ? entry : top;
+  });
+
+  const afterMerges = Number(latest.countAfterMerges);
+  return Number.isFinite(afterMerges) ? afterMerges : Number(latest.count) || 0;
+}
+
 // The highest Town Hall covered anywhere in this category's static data.
 // Individual units legitimately stop getting new levels at different Town
 // Halls (that's real game design), but if *no* unit in the category has
@@ -514,11 +536,15 @@ module.exports = NodeHelper.create({
     const traps = Array.isArray(localExport.traps) ? localExport.traps : [];
     const scoped = buildings
       .filter((item) => item && item.data !== 1000010 && item.data !== 1000097)
-      .filter((item) => Number(item.cnt) > 0)
+      // A missing "cnt" means a single instance (common for buildings
+      // mid-upgrade, which omit it entirely), not zero - only an explicit
+      // zero/negative count should be dropped.
+      .filter((item) => item.cnt == null || Number(item.cnt) > 0)
       .concat(traps);
 
     let earned = 0;
     let total = 0;
+    const builtCountByDataId = {};
 
     scoped.forEach((item) => {
       const count = Math.max(1, Number(item.cnt) || 1);
@@ -535,6 +561,30 @@ module.exports = NodeHelper.create({
 
       earned += level * count;
       total += effectiveCap * count;
+      builtCountByDataId[item.data] = (builtCountByDataId[item.data] || 0) + count;
+    });
+
+    // The export only lists buildings the player has actually placed, so an
+    // available-but-unbuilt instance (e.g. a second Cannon slot unlocked by
+    // Town Hall but never built) would otherwise be missing from the
+    // denominator entirely and inflate the percentage. Add its full cap as
+    // an unearned contribution instead.
+    Object.keys(STRUCTURE_CAP_INDEX.byDataId).forEach((dataId) => {
+      if (Number(dataId) === 1000010 || Number(dataId) === 1000097) {
+        return;
+      }
+
+      const def = STRUCTURE_CAP_INDEX.byDataId[dataId];
+      const available = availableCountForTownHall(def, townHallLevel);
+      if (available === null) {
+        return;
+      }
+
+      const built = builtCountByDataId[dataId] || 0;
+      const missing = Math.max(0, available - built);
+      if (missing > 0) {
+        total += missing * (maxLevelForTownHall(def, townHallLevel) || 0);
+      }
     });
 
     return {
