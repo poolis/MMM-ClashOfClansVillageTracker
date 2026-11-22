@@ -9,6 +9,11 @@ const cocData = require("clash-of-clans-data");
 // cap ourselves from static game data (this is what third-party trackers do).
 const LEVEL_CAP_INDEX = buildLevelCapIndex();
 
+// Buildings/traps have no equivalent live-API maxLevel to fall back on (the
+// local export only reports their current level), so this index is keyed by
+// the export's numeric "data" id instead of by name.
+const STRUCTURE_CAP_INDEX = buildStructureCapIndex();
+
 function buildLevelCapIndex() {
   const byName = (list) => {
     const map = {};
@@ -42,6 +47,49 @@ function buildLevelCapIndex() {
     heroHallMaxTownHall: maxTownHallRequired(heroHallLevels),
     blacksmithLevels: blacksmithLevels,
     blacksmithMaxTownHall: maxTownHallRequired(blacksmithLevels)
+  };
+}
+
+// Builds a dataId -> definition index covering every ordinary home-village
+// building/trap (walls and crafted defenses are tracked as their own
+// categories elsewhere, so they're excluded here). Several armyBuildings
+// accessors return the single building wrapped in an array rather than a
+// bare object, so this recurses into arrays instead of assuming either shape.
+function buildStructureCapIndex() {
+  const home = cocData.home();
+  const byDataId = {};
+
+  const add = (item) => {
+    if (Array.isArray(item)) {
+      item.forEach(add);
+      return;
+    }
+    if (item && item.dataId) {
+      byDataId[item.dataId] = item;
+    }
+  };
+
+  add(home.defenses().data);
+  add(home.resourceBuildings().data);
+  add(home.resourceBuildings().clanCastle().data);
+  add(home.otherBuildings().data);
+  add(home.traps().data);
+  add(home.armyBuildings().armyCamp().data);
+  add(home.armyBuildings().barracks().data);
+  add(home.armyBuildings().darkBarracks().data);
+  add(home.armyBuildings().laboratory().data);
+  add(home.armyBuildings().spellFactory().data);
+  add(home.armyBuildings().darkSpellFactory().data);
+  add(home.armyBuildings().heroBanner().data);
+  add(home.armyBuildings().heroHall().data);
+  add(home.armyBuildings().blacksmith().data);
+  add(home.armyBuildings().workshop().data);
+  add(home.armyBuildings().petHouse().data);
+  add(home.townHall().data);
+
+  return {
+    byDataId: byDataId,
+    maxTownHall: maxTownHallAcrossDefs(byDataId)
   };
 }
 
@@ -227,7 +275,7 @@ module.exports = NodeHelper.create({
       const apiCategories = [lab, heroes, equipment, pets];
       const exportCategories = localExport
         ? [
-            this.getStructuresProgressFromExport(localExport),
+            this.getStructuresProgressFromExport(localExport, effectiveTownHall),
             this.getSuperchargeProgressFromExport(localExport, effectiveTownHall),
             this.getCraftedDefProgressFromExport(localExport, effectiveTownHall),
             this.getWallsProgressFromExport(localExport, effectiveTownHall)
@@ -444,7 +492,7 @@ module.exports = NodeHelper.create({
     return wallLevelToTh[wallLevel] || 0;
   },
 
-  getStructuresProgressFromExport: function (localExport) {
+  getStructuresProgressFromExport: function (localExport, townHallLevel) {
     if (!localExport) {
       return null;
     }
@@ -456,17 +504,28 @@ module.exports = NodeHelper.create({
       .filter((item) => Number(item.cnt) > 0)
       .concat(traps);
 
-    const total = scoped.reduce((sum, item) => sum + (Number(item.cnt) || 1), 0);
-    const upgrading = scoped.reduce((sum, item) => {
-      const count = Number(item.cnt) || 1;
-      return sum + (item.timer ? count : 0);
-    }, 0);
+    let earned = 0;
+    let total = 0;
+
+    scoped.forEach((item) => {
+      const count = Math.max(1, Number(item.cnt) || 1);
+      const level = Math.max(0, Number(item.lvl) || 0);
+      const def = STRUCTURE_CAP_INDEX.byDataId[item.data];
+      const cap = def ? maxLevelForTownHall(def, townHallLevel, STRUCTURE_CAP_INDEX.maxTownHall) : null;
+      // Buildings have no live-API maxLevel to fall back on like
+      // troops/heroes do, so when the static data doesn't identify or cover
+      // this building, assume its current level is already its cap.
+      const effectiveCap = cap !== null ? Math.max(cap, level) : level;
+
+      earned += level * count;
+      total += effectiveCap * count;
+    });
 
     return {
       label: "Structures",
-      earned: Math.max(0, total - upgrading),
+      earned,
       total,
-      percent: total > 0 ? ((total - upgrading) / total) * 100 : 0
+      percent: total > 0 ? (earned / total) * 100 : 0
     };
   },
 
