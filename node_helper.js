@@ -9,6 +9,11 @@ const cocData = require("clash-of-clans-data");
 // cap ourselves from static game data (this is what third-party trackers do).
 const LEVEL_CAP_INDEX = buildLevelCapIndex();
 
+// Buildings/traps have no equivalent live-API maxLevel to fall back on (the
+// local export only reports their current level), so this index is keyed by
+// the export's numeric "data" id instead of by name.
+const STRUCTURE_CAP_INDEX = buildStructureCapIndex();
+
 function buildLevelCapIndex() {
   const byName = (list) => {
     const map = {};
@@ -20,18 +25,84 @@ function buildLevelCapIndex() {
 
   const home = cocData.home();
   const heroHallLevels = home.armyBuildings().heroHall().data[0].levels;
+  const blacksmithLevels = home.armyBuildings().blacksmith().data[0].levels;
+  const troops = byName(home.troops().data);
+  const siegeMachines = byName(home.siegeMachines().data);
+  const spells = byName(home.spells().data);
+  const pets = byName(home.pets().data);
 
   return {
-    troops: byName(home.troops().data),
-    siegeMachines: byName(home.siegeMachines().data),
-    spells: byName(home.spells().data),
-    pets: byName(home.pets().data),
+    troops: troops,
+    troopsMaxTownHall: maxTownHallAcrossDefs(troops),
+    siegeMachines: siegeMachines,
+    siegeMachinesMaxTownHall: maxTownHallAcrossDefs(siegeMachines),
+    spells: spells,
+    spellsMaxTownHall: maxTownHallAcrossDefs(spells),
+    pets: pets,
+    petsMaxTownHall: maxTownHallAcrossDefs(pets),
     heroes: byName(home.heroes().data),
     equipment: byName(home.heroEquipment().data),
     craftedDefenses: byName(home.craftedDefenses().data),
     heroHallLevels: heroHallLevels,
     heroHallMaxTownHall: maxTownHallRequired(heroHallLevels),
-    blacksmithLevels: home.armyBuildings().blacksmith().data[0].levels
+    blacksmithLevels: blacksmithLevels,
+    blacksmithMaxTownHall: maxTownHallRequired(blacksmithLevels)
+  };
+}
+
+// Builds a dataId -> definition index covering every ordinary home-village
+// building/trap (walls and crafted defenses are tracked as their own
+// categories elsewhere, so they're excluded here). Several armyBuildings
+// accessors return the single building wrapped in an array rather than a
+// bare object, so this recurses into arrays instead of assuming either shape.
+function buildStructureCapIndex() {
+  const home = cocData.home();
+  const byDataId = {};
+
+  const add = (item) => {
+    if (Array.isArray(item)) {
+      item.forEach(add);
+      return;
+    }
+    if (item && item.dataId) {
+      byDataId[item.dataId] = item;
+    }
+  };
+
+  add(home.defenses().data);
+  add(home.resourceBuildings().data);
+  add(home.resourceBuildings().clanCastle().data);
+  add(home.otherBuildings().data);
+  add(home.traps().data);
+  add(home.armyBuildings().armyCamp().data);
+  add(home.armyBuildings().barracks().data);
+  add(home.armyBuildings().darkBarracks().data);
+  add(home.armyBuildings().laboratory().data);
+  add(home.armyBuildings().spellFactory().data);
+  add(home.armyBuildings().darkSpellFactory().data);
+  add(home.armyBuildings().heroBanner().data);
+  add(home.armyBuildings().heroHall().data);
+  add(home.armyBuildings().blacksmith().data);
+  add(home.armyBuildings().workshop().data);
+  add(home.armyBuildings().petHouse().data);
+  add(home.townHall().data);
+
+  // Unlike every other building, the Town Hall's own level *is* the
+  // player's Town Hall level (there's no separate "requirement"), but the
+  // package leaves townHallRequired unset on its level entries. Left as-is,
+  // maxLevelForTownHall would treat every entry as unlocked and always
+  // return the package's highest known Town Hall level as the cap, instead
+  // of the player's own level.
+  const townHall = byDataId[1000001];
+  if (townHall && Array.isArray(townHall.levels)) {
+    townHall.levels = townHall.levels.map((lvl) => ({
+      ...lvl,
+      townHallRequired: lvl.level
+    }));
+  }
+
+  return {
+    byDataId: byDataId
   };
 }
 
@@ -42,8 +113,48 @@ function maxTownHallRequired(entries) {
   );
 }
 
-function maxLevelForTownHall(def, townHallLevel) {
+// How many instances of this building are available at townHallLevel. Some
+// defenses get consumed by later merges into a different building (e.g.
+// several Cannons merging away), reducing the standalone count even though
+// the nominal "count" stays the same - countAfterMerges reflects that.
+function availableCountForTownHall(def, townHallLevel) {
+  if (!def || !Array.isArray(def.availablePerTownHall) || !def.availablePerTownHall.length) {
+    return null;
+  }
+
+  const unlocked = def.availablePerTownHall.filter((entry) => (Number(entry.townHallLevel) || 0) <= townHallLevel);
+  if (!unlocked.length) {
+    return 0;
+  }
+
+  const latest = unlocked.reduce((top, entry) => {
+    return Number(entry.townHallLevel) > Number(top.townHallLevel) ? entry : top;
+  });
+
+  const afterMerges = Number(latest.countAfterMerges);
+  return Number.isFinite(afterMerges) ? afterMerges : Number(latest.count) || 0;
+}
+
+// The highest Town Hall covered anywhere in this category's static data.
+// Individual units legitimately stop getting new levels at different Town
+// Halls (that's real game design), but if *no* unit in the category has
+// data past this Town Hall, the package itself hasn't been updated for it.
+function maxTownHallAcrossDefs(defsByName) {
+  return Object.keys(defsByName).reduce((max, key) => {
+    return Math.max(max, maxTownHallRequired(defsByName[key].levels));
+  }, 0);
+}
+
+function maxLevelForTownHall(def, townHallLevel, categoryMaxTownHall) {
   if (!def || !Array.isArray(def.levels)) {
+    return null;
+  }
+
+  if (typeof categoryMaxTownHall === "number" && townHallLevel > categoryMaxTownHall) {
+    // No unit in this category has data past categoryMaxTownHall, meaning
+    // the static data package doesn't cover this Town Hall yet. Let the
+    // caller fall back to the live API's maxLevel instead of reusing this
+    // unit's last known cap, which may now be stale rather than its true max.
     return null;
   }
 
@@ -199,7 +310,7 @@ module.exports = NodeHelper.create({
       const apiCategories = [lab, heroes, equipment, pets];
       const exportCategories = localExport
         ? [
-            this.getStructuresProgressFromExport(localExport),
+            this.getStructuresProgressFromExport(localExport, effectiveTownHall),
             this.getSuperchargeProgressFromExport(localExport, effectiveTownHall),
             this.getCraftedDefProgressFromExport(localExport, effectiveTownHall),
             this.getWallsProgressFromExport(localExport, effectiveTownHall)
@@ -285,19 +396,23 @@ module.exports = NodeHelper.create({
     const key = String(name || "").toLowerCase();
 
     if (category === "troop") {
-      return maxLevelForTownHall(LEVEL_CAP_INDEX.troops[key], townHallLevel);
+      return maxLevelForTownHall(LEVEL_CAP_INDEX.troops[key], townHallLevel, LEVEL_CAP_INDEX.troopsMaxTownHall);
     }
 
     if (category === "siegeMachine") {
-      return maxLevelForTownHall(LEVEL_CAP_INDEX.siegeMachines[key], townHallLevel);
+      return maxLevelForTownHall(
+        LEVEL_CAP_INDEX.siegeMachines[key],
+        townHallLevel,
+        LEVEL_CAP_INDEX.siegeMachinesMaxTownHall
+      );
     }
 
     if (category === "spell") {
-      return maxLevelForTownHall(LEVEL_CAP_INDEX.spells[key], townHallLevel);
+      return maxLevelForTownHall(LEVEL_CAP_INDEX.spells[key], townHallLevel, LEVEL_CAP_INDEX.spellsMaxTownHall);
     }
 
     if (category === "pet") {
-      return maxLevelForTownHall(LEVEL_CAP_INDEX.pets[key], townHallLevel);
+      return maxLevelForTownHall(LEVEL_CAP_INDEX.pets[key], townHallLevel, LEVEL_CAP_INDEX.petsMaxTownHall);
     }
 
     if (category === "hero") {
@@ -324,6 +439,13 @@ module.exports = NodeHelper.create({
     if (category === "equipment") {
       const def = LEVEL_CAP_INDEX.equipment[key];
       if (!def) {
+        return null;
+      }
+
+      if (townHallLevel > LEVEL_CAP_INDEX.blacksmithMaxTownHall) {
+        // The static blacksmith data doesn't cover this Town Hall yet, so
+        // fall back to the API's maxLevel instead of applying a stale,
+        // lower cap from the highest Town Hall the data package knows about.
         return null;
       }
 
@@ -405,7 +527,7 @@ module.exports = NodeHelper.create({
     return wallLevelToTh[wallLevel] || 0;
   },
 
-  getStructuresProgressFromExport: function (localExport) {
+  getStructuresProgressFromExport: function (localExport, townHallLevel) {
     if (!localExport) {
       return null;
     }
@@ -414,20 +536,62 @@ module.exports = NodeHelper.create({
     const traps = Array.isArray(localExport.traps) ? localExport.traps : [];
     const scoped = buildings
       .filter((item) => item && item.data !== 1000010 && item.data !== 1000097)
-      .filter((item) => Number(item.cnt) > 0)
+      // A missing "cnt" means a single instance (common for buildings
+      // mid-upgrade, which omit it entirely), not zero - only an explicit
+      // zero/negative count should be dropped.
+      .filter((item) => item.cnt == null || Number(item.cnt) > 0)
       .concat(traps);
 
-    const total = scoped.reduce((sum, item) => sum + (Number(item.cnt) || 1), 0);
-    const upgrading = scoped.reduce((sum, item) => {
-      const count = Number(item.cnt) || 1;
-      return sum + (item.timer ? count : 0);
-    }, 0);
+    let earned = 0;
+    let total = 0;
+    const builtCountByDataId = {};
+
+    scoped.forEach((item) => {
+      const count = Math.max(1, Number(item.cnt) || 1);
+      const level = Math.max(0, Number(item.lvl) || 0);
+      const def = STRUCTURE_CAP_INDEX.byDataId[item.data];
+      // Unlike troops/heroes, buildings have no live-API maxLevel to fall
+      // back on when the static data runs out, so the latest known cap is
+      // kept as a conservative denominator instead of being discarded -
+      // that still surfaces real, unfinished upgrades (e.g. a level-10
+      // defense sitting well below its known level-21 cap), whereas
+      // assuming every building is already maxed would hide them entirely.
+      const cap = def ? maxLevelForTownHall(def, townHallLevel) : null;
+      const effectiveCap = cap !== null ? Math.max(cap, level) : level;
+
+      earned += level * count;
+      total += effectiveCap * count;
+      builtCountByDataId[item.data] = (builtCountByDataId[item.data] || 0) + count;
+    });
+
+    // The export only lists buildings the player has actually placed, so an
+    // available-but-unbuilt instance (e.g. a second Cannon slot unlocked by
+    // Town Hall but never built) would otherwise be missing from the
+    // denominator entirely and inflate the percentage. Add its full cap as
+    // an unearned contribution instead.
+    Object.keys(STRUCTURE_CAP_INDEX.byDataId).forEach((dataId) => {
+      if (Number(dataId) === 1000010 || Number(dataId) === 1000097) {
+        return;
+      }
+
+      const def = STRUCTURE_CAP_INDEX.byDataId[dataId];
+      const available = availableCountForTownHall(def, townHallLevel);
+      if (available === null) {
+        return;
+      }
+
+      const built = builtCountByDataId[dataId] || 0;
+      const missing = Math.max(0, available - built);
+      if (missing > 0) {
+        total += missing * (maxLevelForTownHall(def, townHallLevel) || 0);
+      }
+    });
 
     return {
       label: "Structures",
-      earned: Math.max(0, total - upgrading),
+      earned,
       total,
-      percent: total > 0 ? ((total - upgrading) / total) * 100 : 0
+      percent: total > 0 ? (earned / total) * 100 : 0
     };
   },
 
