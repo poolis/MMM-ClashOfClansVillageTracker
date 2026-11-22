@@ -87,9 +87,22 @@ function buildStructureCapIndex() {
   add(home.armyBuildings().petHouse().data);
   add(home.townHall().data);
 
+  // Unlike every other building, the Town Hall's own level *is* the
+  // player's Town Hall level (there's no separate "requirement"), but the
+  // package leaves townHallRequired unset on its level entries. Left as-is,
+  // maxLevelForTownHall would treat every entry as unlocked and always
+  // return the package's highest known Town Hall level as the cap, instead
+  // of the player's own level.
+  const townHall = byDataId[1000001];
+  if (townHall && Array.isArray(townHall.levels)) {
+    townHall.levels = townHall.levels.map((lvl) => ({
+      ...lvl,
+      townHallRequired: lvl.level
+    }));
+  }
+
   return {
-    byDataId: byDataId,
-    maxTownHall: maxTownHallAcrossDefs(byDataId)
+    byDataId: byDataId
   };
 }
 
@@ -511,10 +524,13 @@ module.exports = NodeHelper.create({
       const count = Math.max(1, Number(item.cnt) || 1);
       const level = Math.max(0, Number(item.lvl) || 0);
       const def = STRUCTURE_CAP_INDEX.byDataId[item.data];
-      const cap = def ? maxLevelForTownHall(def, townHallLevel, STRUCTURE_CAP_INDEX.maxTownHall) : null;
-      // Buildings have no live-API maxLevel to fall back on like
-      // troops/heroes do, so when the static data doesn't identify or cover
-      // this building, assume its current level is already its cap.
+      // Unlike troops/heroes, buildings have no live-API maxLevel to fall
+      // back on when the static data runs out, so the latest known cap is
+      // kept as a conservative denominator instead of being discarded -
+      // that still surfaces real, unfinished upgrades (e.g. a level-10
+      // defense sitting well below its known level-21 cap), whereas
+      // assuming every building is already maxed would hide them entirely.
+      const cap = def ? maxLevelForTownHall(def, townHallLevel) : null;
       const effectiveCap = cap !== null ? Math.max(cap, level) : level;
 
       earned += level * count;
